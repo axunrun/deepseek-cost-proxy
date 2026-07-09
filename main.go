@@ -821,7 +821,7 @@ const dashboardHTML = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeepSeek Cost Proxy</title>
+  <title>DeepSeek 成本代理</title>
   <style>
     body { margin: 0; font-family: Arial, sans-serif; background: #f6f7f9; color: #1d232b; }
     header { padding: 20px 28px; background: #111827; color: white; }
@@ -853,28 +853,28 @@ const dashboardHTML = `<!doctype html>
 </head>
 <body>
   <header>
-    <h1>DeepSeek Cost Proxy</h1>
+    <h1>DeepSeek 成本代理</h1>
   </header>
   <main>
     <nav class="tabs">
-      <button class="tab active" id="tabDashboard" onclick="showView('dashboard')">Dashboard</button>
-      <button class="tab" id="tabDebug" onclick="showView('debug')">Prompt Debug</button>
+      <button class="tab active" id="tabDashboard" onclick="showView('dashboard')">数据看板</button>
+      <button class="tab" id="tabDebug" onclick="showView('debug')">Prompt 调试</button>
     </nav>
     <section class="view active" id="dashboardView">
       <section class="grid">
-        <div class="card"><div class="label">Requests</div><div class="value" id="requests">0</div></div>
-        <div class="card"><div class="label">Prompt Tokens</div><div class="value" id="prompt">0</div></div>
-        <div class="card"><div class="label">Cached / New</div><div class="value" id="cached">0 / 0</div></div>
-        <div class="card"><div class="label">Hit Rate</div><div class="value" id="hitRate">0%</div></div>
-        <div class="card"><div class="label">Estimated Cost</div><div class="value" id="cost">CNY 0</div></div>
-        <div class="card"><div class="label">Estimated Saved</div><div class="value" id="saved">CNY 0</div></div>
+        <div class="card"><div class="label">请求数</div><div class="value" id="requests">0</div></div>
+        <div class="card"><div class="label">输入 Tokens</div><div class="value" id="prompt">0</div></div>
+        <div class="card"><div class="label">缓存 / 新输入</div><div class="value" id="cached">0 / 0</div></div>
+        <div class="card"><div class="label">缓存命中率</div><div class="value" id="hitRate">0%</div></div>
+        <div class="card"><div class="label">估算费用</div><div class="value" id="cost">CNY 0</div></div>
+        <div class="card"><div class="label">估算节省</div><div class="value" id="saved">CNY 0</div></div>
       </section>
       <table>
         <thead>
           <tr>
-            <th>ID</th><th>Time</th><th>Model</th><th>Status</th><th>Prompt</th>
-            <th>Cached</th><th>New</th><th>Hit</th><th>Stream</th>
-            <th>Raw Prefix</th><th>Normalized Prefix</th><th>Tools</th><th>Saved</th>
+            <th>ID</th><th>时间</th><th>模型</th><th>状态</th><th>输入</th>
+            <th>缓存</th><th>新输入</th><th>命中率</th><th>流式</th>
+            <th>原始前缀</th><th>优化后前缀</th><th>工具</th><th>节省</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -882,15 +882,15 @@ const dashboardHTML = `<!doctype html>
     </section>
     <section class="view debug" id="debugView">
       <aside class="panel">
-        <h2>Requests</h2>
+        <h2>请求记录</h2>
         <div class="debug-list" id="debugList"></div>
       </aside>
       <section class="panel">
-        <h2>Raw vs Normalized</h2>
+        <h2>原始请求 vs 优化后请求</h2>
         <div class="meta" id="debugMeta"></div>
-        <h3>Raw Hermes Request Preview</h3>
+        <h3>Hermes 原始请求预览</h3>
         <pre id="rawPreview">{}</pre>
-        <h3>Normalized DeepSeek Request Preview</h3>
+        <h3>发送给 DeepSeek 的请求预览</h3>
         <pre id="normalizedPreview">{}</pre>
       </section>
     </section>
@@ -932,10 +932,10 @@ const dashboardHTML = `<!doctype html>
           '<td>' + fmt.format(item.promptCacheHitTokens || 0) + '</td>' +
           '<td>' + fmt.format(item.promptCacheMissTokens || 0) + '</td>' +
           '<td><div class="bar"><span style="width:' + ((item.hitRate || 0) * 100) + '%"></span></div> ' + pct(item.hitRate) + '</td>' +
-          '<td>' + (item.stream ? 'yes' : 'no') + '</td>' +
+          '<td>' + (item.stream ? '是' : '否') + '</td>' +
           '<td>' + esc(item.rawPrefixHash || '') + '</td>' +
           '<td>' + esc(item.normalizedPrefixHash || '') + '</td>' +
-          '<td>' + (item.toolsChanged ? 'sorted' : 'same') + '</td>' +
+          '<td>' + (item.toolsChanged ? '已排序' : '未变化') + '</td>' +
           '<td>CNY ' + (item.estimatedSavedCNY || 0).toFixed(6) + '</td>' +
         '</tr>';
       }).join('');
@@ -955,12 +955,12 @@ const dashboardHTML = `<!doctype html>
       const res = await fetch('/debug/requests/' + id);
       const item = await res.json();
       document.querySelector('#debugMeta').innerHTML =
-        '<div>Raw Prefix<br><b>' + esc(item.rawPrefixHash) + '</b></div>' +
-        '<div>Normalized Prefix<br><b>' + esc(item.normalizedPrefixHash) + '</b></div>' +
-        '<div>Tools Changed<br><b>' + item.toolsChanged + '</b></div>' +
-        '<div>System Changed<br><b>' + item.systemChanged + '</b></div>' +
-        '<div>Raw Tools<br><b>' + esc((item.rawToolsOrder || []).join(', ')) + '</b></div>' +
-        '<div>Normalized Tools<br><b>' + esc((item.normalizedToolsOrder || []).join(', ')) + '</b></div>';
+        '<div>原始前缀<br><b>' + esc(item.rawPrefixHash) + '</b></div>' +
+        '<div>优化后前缀<br><b>' + esc(item.normalizedPrefixHash) + '</b></div>' +
+        '<div>工具顺序变化<br><b>' + (item.toolsChanged ? '是' : '否') + '</b></div>' +
+        '<div>System 变化<br><b>' + (item.systemChanged ? '是' : '否') + '</b></div>' +
+        '<div>原始工具顺序<br><b>' + esc((item.rawToolsOrder || []).join(', ')) + '</b></div>' +
+        '<div>优化后工具顺序<br><b>' + esc((item.normalizedToolsOrder || []).join(', ')) + '</b></div>';
       document.querySelector('#rawPreview').textContent = JSON.stringify(item.rawPreview, null, 2);
       document.querySelector('#normalizedPreview').textContent = JSON.stringify(item.normalizedPreview, null, 2);
     }

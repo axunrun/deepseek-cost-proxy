@@ -117,7 +117,7 @@ Open the unified WebUI in a browser:
 http://<unraid-ip>:18188/dashboard
 ```
 
-The WebUI has two tabs: Dashboard and Prompt Debug. Dashboard shows recent
+The WebUI has two tabs: 数据看板 and Prompt 调试. 数据看板 shows recent
 requests, prompt tokens, cached tokens, new tokens, cache hit rate, estimated
 cost, and estimated savings. Both buffered and streaming responses are tracked
 when the upstream response includes usage data.
@@ -135,12 +135,16 @@ order, normalized tool order, and truncated request previews.
 
 ## Cache Test
 
+短 prompt 看不出缓存优化。要测试优化效果，需要连续发送两次带有相同长
+`system + tools` 前缀的请求，然后观察第二次的 `cached`、`hitRate` 和
+`savedCNY` 是否明显上升。
+
 Start the proxy, then run:
 
 ```powershell
 .\scripts\cache-test.ps1 `
-  -ProxyUrl http://127.0.0.1:18188 `
-  -ProxyKey local-proxy-key `
+  -ProxyUrl http://192.168.1.50:18188 `
+  -ProxyKey <your-proxy-key> `
   -Model deepseek-v4-flash
 ```
 
