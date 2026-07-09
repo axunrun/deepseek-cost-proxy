@@ -178,6 +178,19 @@ func TestMetricsStorePersistsAndLoadsRequests(t *testing.T) {
 	}
 }
 
+func TestStorageStatusReportsWritableTraceDir(t *testing.T) {
+	store := newMetricsStore(filepath.Join(t.TempDir(), "traces"))
+
+	status := store.storageStatus()
+
+	if status["writable"] != true {
+		t.Fatalf("storage status = %+v", status)
+	}
+	if status["traceDir"] == "" || status["path"] == "" {
+		t.Fatalf("storage status missing paths: %+v", status)
+	}
+}
+
 func TestHandleChatCompletionsPersistsTrace(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

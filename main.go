@@ -136,6 +136,9 @@ func main() {
 	mux.HandleFunc("/debug/requests/", func(w http.ResponseWriter, r *http.Request) {
 		handleDebugRequest(metrics, w, r)
 	})
+	mux.HandleFunc("/debug/storage", func(w http.ResponseWriter, r *http.Request) {
+		handleDebugStorage(metrics, w, r)
+	})
 	mux.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
 		handleDebugPage(w, r)
 	})
@@ -758,6 +761,42 @@ func (s *metricsStore) debugByID(id int) (debugTrace, bool) {
 	return debugTrace{}, false
 }
 
+func (s *metricsStore) storageStatus() map[string]any {
+	path := filepath.Join(s.traceDir, "requests.jsonl")
+	status := map[string]any{
+		"traceDir": s.traceDir,
+		"path":     path,
+	}
+	if info, err := os.Stat(s.traceDir); err == nil {
+		status["traceDirExists"] = true
+		status["traceDirIsDir"] = info.IsDir()
+	} else {
+		status["traceDirExists"] = false
+		status["traceDirError"] = err.Error()
+	}
+	if info, err := os.Stat(path); err == nil {
+		status["fileExists"] = true
+		status["fileSize"] = info.Size()
+	} else {
+		status["fileExists"] = false
+		status["fileError"] = err.Error()
+	}
+	if err := os.MkdirAll(s.traceDir, 0o755); err != nil {
+		status["writable"] = false
+		status["writeError"] = err.Error()
+		return status
+	}
+	probe := filepath.Join(s.traceDir, ".write-test")
+	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
+		status["writable"] = false
+		status["writeError"] = err.Error()
+		return status
+	}
+	_ = os.Remove(probe)
+	status["writable"] = true
+	return status
+}
+
 func handleMetrics(metrics *metricsStore, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -791,6 +830,14 @@ func handleDebugRequest(metrics *metricsStore, w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, trace)
+}
+
+func handleDebugStorage(metrics *metricsStore, w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, metrics.storageStatus())
 }
 
 func handleDashboard(w http.ResponseWriter, r *http.Request) {

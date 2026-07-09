@@ -104,6 +104,12 @@ On Unraid, the `/data` path mapping is required. Without it, history is written
 inside the container filesystem and will be lost when the container is recreated
 or updated.
 
+Check the active container storage path:
+
+```text
+http://<unraid-ip>:18188/debug/storage
+```
+
 ## Endpoints
 
 - `GET /v1`
@@ -113,6 +119,7 @@ or updated.
 - `GET /metrics`
 - `GET /debug/requests`
 - `GET /debug/requests/<id>`
+- `GET /debug/storage`
 - `POST /v1/chat/completions`
 
 Open the unified WebUI in a browser:
