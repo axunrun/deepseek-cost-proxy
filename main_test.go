@@ -212,15 +212,16 @@ func TestApplyUsageReadsOpenAIStyleCachedTokens(t *testing.T) {
 	if metric.PromptCacheHitTokens != 80 || metric.PromptCacheMissTokens != 20 {
 		t.Fatalf("metric = %+v", metric)
 	}
-	if metric.Currency != "USD" {
+	if metric.Currency != "CNY" {
 		t.Fatalf("currency = %q", metric.Currency)
 	}
-	if math.Abs(metric.EstimatedCost-0.0000168) > 0.000000001 ||
-		math.Abs(metric.EstimatedSaved-0.0000192) > 0.000000001 {
+	if math.Abs(metric.EstimatedCost-0.0001176) > 0.000000001 ||
+		math.Abs(metric.EstimatedSaved-0.0001344) > 0.000000001 {
 		t.Fatalf("cost = %+v", metric)
 	}
-	if metric.EstimatedCostCNY != 0 || metric.EstimatedSavedCNY != 0 {
-		t.Fatalf("MiniMax should not be folded into CNY totals: %+v", metric)
+	if metric.EstimatedCostCNY != metric.EstimatedCost ||
+		metric.EstimatedSavedCNY != metric.EstimatedSaved {
+		t.Fatalf("MiniMax should be folded into CNY totals: %+v", metric)
 	}
 }
 
@@ -422,7 +423,7 @@ func TestHandleChatCompletionsRoutesMiniMaxModel(t *testing.T) {
 	}
 	summary := metrics.snapshot()["summary"].(map[string]any)
 	costByCurrency := summary["costByCurrency"].(map[string]float64)
-	if costByCurrency["USD"] == 0 {
+	if costByCurrency["CNY"] == 0 {
 		t.Fatalf("summary = %+v", summary)
 	}
 }

@@ -63,10 +63,11 @@ Hardcoded pricing estimate per 1M tokens:
 | --- | --- | ---: | ---: | ---: |
 | `deepseek-v4-flash` | CNY | 0.02 | 1 | 2 |
 | `deepseek-v4-pro` | CNY | 0.025 | 3 | 6 |
-| `MiniMax-M3` | USD | 0.06 | 0.30 | 1.20 |
+| `MiniMax-M3` | CNY | 0.42 | 2.10 | 8.40 |
 
-MiniMax uses its standard Pay-as-you-go prices for the <=512k input tier. The
-dashboard keeps CNY and USD totals separate instead of adding them together.
+MiniMax uses the China-region standard Pay-as-you-go discounted prices for the
+<=512k input tier. Set `MINIMAX_CHAT_URL` to
+`https://api.minimaxi.com/v1/chat/completions` when using a China-region key.
 
 ## Docker / Unraid
 

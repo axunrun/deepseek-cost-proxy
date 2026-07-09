@@ -691,10 +691,10 @@ func pricingForModel(model string) pricing {
 		}
 	case "MiniMax-M3":
 		return pricing{
-			Currency: "USD",
-			CacheHit: 0.06,
-			Input:    0.30,
-			Output:   1.20,
+			Currency: "CNY",
+			CacheHit: 0.42,
+			Input:    2.10,
+			Output:   8.40,
 		}
 	default:
 		return pricing{
