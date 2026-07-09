@@ -86,6 +86,8 @@ type requestMetric struct {
 	NormalizedPrefixHash  string    `json:"normalizedPrefixHash,omitempty"`
 	ToolsChanged          bool      `json:"toolsChanged"`
 	SystemChanged         bool      `json:"systemChanged"`
+	PrefixChanged         bool      `json:"prefixChanged"`
+	PrefixChangeReasons   []string  `json:"prefixChangeReasons,omitempty"`
 	EstimatedCostCNY      float64   `json:"estimatedCostCNY"`
 	EstimatedSavedCNY     float64   `json:"estimatedSavedCNY"`
 }
@@ -101,8 +103,11 @@ type debugTrace struct {
 	NormSystemHash    string          `json:"normalizedSystemHash"`
 	RawToolsHash      string          `json:"rawToolsHash"`
 	NormToolsHash     string          `json:"normalizedToolsHash"`
+	RawThinkingHash   string          `json:"rawThinkingHash"`
+	NormThinkingHash  string          `json:"normalizedThinkingHash"`
 	ToolsChanged      bool            `json:"toolsChanged"`
 	SystemChanged     bool            `json:"systemChanged"`
+	ThinkingChanged   bool            `json:"thinkingChanged"`
 	RawToolsOrder     []string        `json:"rawToolsOrder,omitempty"`
 	NormToolsOrder    []string        `json:"normalizedToolsOrder,omitempty"`
 	RawPreview        json.RawMessage `json:"rawPreview"`
@@ -381,8 +386,11 @@ func buildDebugTrace(raw, normalized map[string]any, model string, stream bool) 
 		NormSystemHash:    normalizedShape.systemHash,
 		RawToolsHash:      rawShape.toolsHash,
 		NormToolsHash:     normalizedShape.toolsHash,
+		RawThinkingHash:   rawShape.thinkingHash,
+		NormThinkingHash:  normalizedShape.thinkingHash,
 		ToolsChanged:      rawShape.toolsHash != normalizedShape.toolsHash,
 		SystemChanged:     rawShape.systemHash != normalizedShape.systemHash,
+		ThinkingChanged:   rawShape.thinkingHash != normalizedShape.thinkingHash,
 		RawToolsOrder:     toolsOrder(raw),
 		NormToolsOrder:    toolsOrder(normalized),
 		RawPreview:        previewJSON(raw),
@@ -391,21 +399,28 @@ func buildDebugTrace(raw, normalized map[string]any, model string, stream bool) 
 }
 
 type requestShape struct {
-	systemHash string
-	toolsHash  string
-	prefixHash string
+	systemHash   string
+	toolsHash    string
+	thinkingHash string
+	prefixHash   string
 }
 
 func prefixShape(raw map[string]any) requestShape {
 	system := systemPrompt(raw)
 	tools := raw["tools"]
+	thinking := map[string]any{
+		"thinking":         raw["thinking"],
+		"reasoning_effort": raw["reasoning_effort"],
+	}
 	toolsJSON, _ := json.Marshal(tools)
 	return requestShape{
-		systemHash: shortHash(system),
-		toolsHash:  shortHash(string(toolsJSON)),
+		systemHash:   shortHash(system),
+		toolsHash:    shortHash(string(toolsJSON)),
+		thinkingHash: shortHash(thinking),
 		prefixHash: shortHash(map[string]any{
-			"system": system,
-			"tools":  string(toolsJSON),
+			"system":   system,
+			"tools":    string(toolsJSON),
+			"thinking": thinking,
 		}),
 	}
 }
@@ -643,6 +658,10 @@ func newMetricsStore(traceDir string) *metricsStore {
 
 func (s *metricsStore) add(metric requestMetric, trace debugTrace) {
 	s.mu.Lock()
+	if len(s.requests) > 0 && len(s.debug) > 0 {
+		metric.PrefixChangeReasons = prefixChangeReasons(s.requests[len(s.requests)-1], s.debug[len(s.debug)-1], metric, trace)
+		metric.PrefixChanged = len(metric.PrefixChangeReasons) > 0
+	}
 	s.nextID++
 	metric.ID = s.nextID
 	trace.ID = metric.ID
@@ -660,6 +679,26 @@ func (s *metricsStore) add(metric requestMetric, trace debugTrace) {
 	if err := s.persist(record); err != nil {
 		log.Printf("trace persist failed: %v", err)
 	}
+}
+
+func prefixChangeReasons(prevMetric requestMetric, prevTrace debugTrace, curMetric requestMetric, curTrace debugTrace) []string {
+	var reasons []string
+	if prevMetric.Model != "" && prevMetric.Model != curMetric.Model {
+		reasons = append(reasons, "model")
+	}
+	if prevTrace.NormSystemHash != "" && prevTrace.NormSystemHash != curTrace.NormSystemHash {
+		reasons = append(reasons, "system")
+	}
+	if prevTrace.NormToolsHash != "" && prevTrace.NormToolsHash != curTrace.NormToolsHash {
+		reasons = append(reasons, "tools")
+	}
+	if prevTrace.NormThinkingHash != "" && prevTrace.NormThinkingHash != curTrace.NormThinkingHash {
+		reasons = append(reasons, "thinking")
+	}
+	if len(reasons) == 0 && prevTrace.NormPrefixHash != "" && prevTrace.NormPrefixHash != curTrace.NormPrefixHash {
+		reasons = append(reasons, "prefix")
+	}
+	return reasons
 }
 
 func (s *metricsStore) persist(record persistedRequest) error {
@@ -936,7 +975,7 @@ const dashboardHTML = `<!doctype html>
           <tr>
             <th>ID</th><th>时间</th><th>模型</th><th>状态</th><th>输入</th>
             <th>缓存</th><th>新输入</th><th>命中率</th><th>流式</th>
-            <th>原始前缀</th><th>优化后前缀</th><th>工具</th><th>费用</th><th>节省</th>
+            <th>原始前缀</th><th>优化后前缀</th><th>工具</th><th>前缀变化</th><th>费用</th><th>节省</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -965,6 +1004,10 @@ const dashboardHTML = `<!doctype html>
       }[ch]));
     }
     function pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; }
+    function prefixReason(item) {
+      const reasons = item.prefixChangeReasons || [];
+      return reasons.length ? esc(reasons.join(', ')) : '稳定';
+    }
     function showView(name) {
       const debug = name === 'debug';
       document.querySelector('#dashboardView').classList.toggle('active', !debug);
@@ -998,6 +1041,7 @@ const dashboardHTML = `<!doctype html>
           '<td>' + esc(item.rawPrefixHash || '') + '</td>' +
           '<td>' + esc(item.normalizedPrefixHash || '') + '</td>' +
           '<td>' + (item.toolsChanged ? '已排序' : '未变化') + '</td>' +
+          '<td>' + prefixReason(item) + '</td>' +
           '<td>CNY ' + (item.estimatedCostCNY || 0).toFixed(6) + '</td>' +
           '<td>CNY ' + (item.estimatedSavedCNY || 0).toFixed(6) + '</td>' +
         '</tr>';

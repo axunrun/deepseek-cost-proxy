@@ -154,6 +154,30 @@ func TestApplyUsageUsesModelPricing(t *testing.T) {
 	}
 }
 
+func TestPrefixChangeReasons(t *testing.T) {
+	prevMetric := requestMetric{Model: "deepseek-v4-flash"}
+	curMetric := requestMetric{Model: "deepseek-v4-pro"}
+	prevTrace := debugTrace{
+		NormSystemHash:   "system-a",
+		NormToolsHash:    "tools-a",
+		NormThinkingHash: "thinking-a",
+		NormPrefixHash:   "prefix-a",
+	}
+	curTrace := debugTrace{
+		NormSystemHash:   "system-b",
+		NormToolsHash:    "tools-b",
+		NormThinkingHash: "thinking-b",
+		NormPrefixHash:   "prefix-b",
+	}
+
+	reasons := prefixChangeReasons(prevMetric, prevTrace, curMetric, curTrace)
+
+	want := []string{"model", "system", "tools", "thinking"}
+	if strings.Join(reasons, ",") != strings.Join(want, ",") {
+		t.Fatalf("reasons = %v, want %v", reasons, want)
+	}
+}
+
 func TestMetricsStorePersistsAndLoadsRequests(t *testing.T) {
 	dir := t.TempDir()
 	store := newMetricsStore(dir)
