@@ -82,28 +82,29 @@ The proxy writes request metrics and debug traces to:
 - `GET /v1`
 - `GET /healthz`
 - `GET /dashboard`
-- `GET /debug`
+- `GET /debug` redirects to `/dashboard#debug`
 - `GET /metrics`
 - `GET /debug/requests`
 - `GET /debug/requests/<id>`
 - `POST /v1/chat/completions`
 
-Open the dashboard in a browser:
+Open the unified WebUI in a browser:
 
 ```text
 http://<unraid-ip>:18188/dashboard
 ```
 
-The dashboard shows recent requests, prompt tokens, cached tokens, new tokens,
-cache hit rate, estimated cost, and estimated savings. Both buffered and
-streaming responses are tracked when the upstream response includes usage data.
+The WebUI has two tabs: Dashboard and Prompt Debug. Dashboard shows recent
+requests, prompt tokens, cached tokens, new tokens, cache hit rate, estimated
+cost, and estimated savings. Both buffered and streaming responses are tracked
+when the upstream response includes usage data.
 The cost fields are estimates; update the price environment variables when the
 DeepSeek price table changes.
 
-Open the debug prompt viewer:
+Open the debug tab directly:
 
 ```text
-http://<unraid-ip>:18188/debug
+http://<unraid-ip>:18188/dashboard#debug
 ```
 
 Debug endpoints compare the raw Hermes request with the normalized request sent
@@ -142,7 +143,7 @@ Done:
 - Buffered and streaming forwarding.
 - Usage capture for buffered and SSE responses.
 - `/metrics`, `/dashboard`, `/debug/requests`, `/debug/requests/<id>`.
-- `/debug` raw vs normalized prompt/request viewer.
+- `/dashboard` unified Dashboard and Prompt Debug UI.
 - Tool sorting by `function.name`.
 - Prefix hash and debug trace.
 - Trace and metrics persistence through JSONL.

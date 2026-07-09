@@ -800,8 +800,7 @@ func handleDebugPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write([]byte(debugHTML))
+	http.Redirect(w, r, "/dashboard#debug", http.StatusFound)
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -820,6 +819,11 @@ const dashboardHTML = `<!doctype html>
     body { margin: 0; font-family: Arial, sans-serif; background: #f6f7f9; color: #1d232b; }
     header { padding: 20px 28px; background: #111827; color: white; }
     main { padding: 24px 28px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 18px; }
+    .tab { border: 1px solid #cbd5e1; background: white; padding: 10px 14px; border-radius: 6px; cursor: pointer; }
+    .tab.active { background: #111827; color: white; border-color: #111827; }
+    .view { display: none; }
+    .view.active { display: block; }
     .grid { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
     .card { background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 16px; }
     .label { color: #667085; font-size: 13px; }
@@ -829,7 +833,15 @@ const dashboardHTML = `<!doctype html>
     th { background: #f1f5f9; color: #475569; }
     .bar { height: 8px; background: #e5e7eb; border-radius: 999px; overflow: hidden; width: 120px; }
     .bar > span { display: block; height: 100%; background: #16a34a; }
+    .debug { grid-template-columns: 320px 1fr; gap: 16px; }
+    .view.debug.active { display: grid; }
+    .debug-list button { display: block; width: 100%; margin: 0 0 8px; padding: 10px; border: 1px solid #d0d5dd; background: white; text-align: left; border-radius: 6px; cursor: pointer; }
+    .panel { background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 16px; }
+    .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+    .meta div { padding: 8px; background: #f8fafc; border-radius: 6px; overflow-wrap: anywhere; }
+    pre { white-space: pre-wrap; overflow: auto; background: #0f172a; color: #e5e7eb; padding: 12px; border-radius: 6px; max-height: 420px; }
     @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 900px) { .debug { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -837,24 +849,44 @@ const dashboardHTML = `<!doctype html>
     <h1>DeepSeek Cost Proxy</h1>
   </header>
   <main>
-    <section class="grid">
-      <div class="card"><div class="label">Requests</div><div class="value" id="requests">0</div></div>
-      <div class="card"><div class="label">Prompt Tokens</div><div class="value" id="prompt">0</div></div>
-      <div class="card"><div class="label">Cached / New</div><div class="value" id="cached">0 / 0</div></div>
-      <div class="card"><div class="label">Hit Rate</div><div class="value" id="hitRate">0%</div></div>
-      <div class="card"><div class="label">Estimated Cost</div><div class="value" id="cost">CNY 0</div></div>
-      <div class="card"><div class="label">Estimated Saved</div><div class="value" id="saved">CNY 0</div></div>
+    <nav class="tabs">
+      <button class="tab active" id="tabDashboard" onclick="showView('dashboard')">Dashboard</button>
+      <button class="tab" id="tabDebug" onclick="showView('debug')">Prompt Debug</button>
+    </nav>
+    <section class="view active" id="dashboardView">
+      <section class="grid">
+        <div class="card"><div class="label">Requests</div><div class="value" id="requests">0</div></div>
+        <div class="card"><div class="label">Prompt Tokens</div><div class="value" id="prompt">0</div></div>
+        <div class="card"><div class="label">Cached / New</div><div class="value" id="cached">0 / 0</div></div>
+        <div class="card"><div class="label">Hit Rate</div><div class="value" id="hitRate">0%</div></div>
+        <div class="card"><div class="label">Estimated Cost</div><div class="value" id="cost">CNY 0</div></div>
+        <div class="card"><div class="label">Estimated Saved</div><div class="value" id="saved">CNY 0</div></div>
+      </section>
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>Time</th><th>Model</th><th>Status</th><th>Prompt</th>
+            <th>Cached</th><th>New</th><th>Hit</th><th>Stream</th>
+            <th>Raw Prefix</th><th>Normalized Prefix</th><th>Tools</th><th>Saved</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
     </section>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th><th>Time</th><th>Model</th><th>Status</th><th>Prompt</th>
-          <th>Cached</th><th>New</th><th>Hit</th><th>Stream</th>
-          <th>Raw Prefix</th><th>Normalized Prefix</th><th>Tools</th><th>Saved</th>
-        </tr>
-      </thead>
-      <tbody id="rows"></tbody>
-    </table>
+    <section class="view debug" id="debugView">
+      <aside class="panel">
+        <h2>Requests</h2>
+        <div class="debug-list" id="debugList"></div>
+      </aside>
+      <section class="panel">
+        <h2>Raw vs Normalized</h2>
+        <div class="meta" id="debugMeta"></div>
+        <h3>Raw Hermes Request Preview</h3>
+        <pre id="rawPreview">{}</pre>
+        <h3>Normalized DeepSeek Request Preview</h3>
+        <pre id="normalizedPreview">{}</pre>
+      </section>
+    </section>
   </main>
   <script>
     const fmt = new Intl.NumberFormat();
@@ -864,6 +896,15 @@ const dashboardHTML = `<!doctype html>
       }[ch]));
     }
     function pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; }
+    function showView(name) {
+      const debug = name === 'debug';
+      document.querySelector('#dashboardView').classList.toggle('active', !debug);
+      document.querySelector('#debugView').classList.toggle('active', debug);
+      document.querySelector('#tabDashboard').classList.toggle('active', !debug);
+      document.querySelector('#tabDebug').classList.toggle('active', debug);
+      location.hash = debug ? 'debug' : 'dashboard';
+      if (debug) loadDebugList();
+    }
     async function refresh() {
       const res = await fetch('/metrics');
       const data = await res.json();
@@ -893,80 +934,32 @@ const dashboardHTML = `<!doctype html>
       }).join('');
       document.querySelector('#rows').innerHTML = rows;
     }
-    refresh();
-    setInterval(refresh, 3000);
-  </script>
-</body>
-</html>`
-
-const debugHTML = `<!doctype html>
-<html lang="zh-CN">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>DeepSeek Cost Proxy Debug</title>
-  <style>
-    body { margin: 0; font-family: Arial, sans-serif; background: #f6f7f9; color: #1d232b; }
-    header { padding: 20px 28px; background: #111827; color: white; }
-    main { padding: 24px 28px; display: grid; grid-template-columns: 320px 1fr; gap: 16px; }
-    button { display: block; width: 100%; margin: 0 0 8px; padding: 10px; border: 1px solid #d0d5dd; background: white; text-align: left; border-radius: 6px; cursor: pointer; }
-    button:hover { background: #f1f5f9; }
-    .panel { background: white; border: 1px solid #d8dee8; border-radius: 8px; padding: 16px; }
-    .meta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
-    .meta div { padding: 8px; background: #f8fafc; border-radius: 6px; overflow-wrap: anywhere; }
-    pre { white-space: pre-wrap; overflow: auto; background: #0f172a; color: #e5e7eb; padding: 12px; border-radius: 6px; max-height: 420px; }
-    h2 { margin-top: 0; }
-    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>Debug Trace</h1>
-  </header>
-  <main>
-    <aside class="panel">
-      <h2>Requests</h2>
-      <div id="list"></div>
-    </aside>
-    <section class="panel">
-      <h2>Raw vs Normalized</h2>
-      <div class="meta" id="meta"></div>
-      <h3>Raw Hermes Request Preview</h3>
-      <pre id="raw">{}</pre>
-      <h3>Normalized DeepSeek Request Preview</h3>
-      <pre id="normalized">{}</pre>
-    </section>
-  </main>
-  <script>
-    function esc(value) {
-      return String(value ?? '').replace(/[&<>"']/g, ch => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
-      }[ch]));
-    }
-    async function loadList() {
+    async function loadDebugList() {
       const res = await fetch('/debug/requests');
       const data = await res.json();
       const items = [...data.requests].reverse();
-      document.querySelector('#list').innerHTML = items.map(item =>
-        '<button onclick="loadOne(' + item.id + ')">#' + item.id + ' ' + esc(item.model) + '<br>' +
+      document.querySelector('#debugList').innerHTML = items.map(item =>
+        '<button onclick="loadDebugRequest(' + item.id + ')">#' + item.id + ' ' + esc(item.model) + '<br>' +
         '<small>' + esc(item.rawPrefixHash) + ' -> ' + esc(item.normalizedPrefixHash) + '</small></button>'
       ).join('');
-      if (items[0]) loadOne(items[0].id);
+      if (items[0]) loadDebugRequest(items[0].id);
     }
-    async function loadOne(id) {
+    async function loadDebugRequest(id) {
       const res = await fetch('/debug/requests/' + id);
       const item = await res.json();
-      document.querySelector('#meta').innerHTML =
+      document.querySelector('#debugMeta').innerHTML =
         '<div>Raw Prefix<br><b>' + esc(item.rawPrefixHash) + '</b></div>' +
         '<div>Normalized Prefix<br><b>' + esc(item.normalizedPrefixHash) + '</b></div>' +
         '<div>Tools Changed<br><b>' + item.toolsChanged + '</b></div>' +
         '<div>System Changed<br><b>' + item.systemChanged + '</b></div>' +
         '<div>Raw Tools<br><b>' + esc((item.rawToolsOrder || []).join(', ')) + '</b></div>' +
         '<div>Normalized Tools<br><b>' + esc((item.normalizedToolsOrder || []).join(', ')) + '</b></div>';
-      document.querySelector('#raw').textContent = JSON.stringify(item.rawPreview, null, 2);
-      document.querySelector('#normalized').textContent = JSON.stringify(item.normalizedPreview, null, 2);
+      document.querySelector('#rawPreview').textContent = JSON.stringify(item.rawPreview, null, 2);
+      document.querySelector('#normalizedPreview').textContent = JSON.stringify(item.normalizedPreview, null, 2);
     }
-    loadList();
+    if (location.hash === '#debug') showView('debug');
+    refresh();
+    setInterval(refresh, 3000);
   </script>
 </body>
 </html>`
