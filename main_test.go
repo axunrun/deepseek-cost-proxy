@@ -51,6 +51,21 @@ func TestListenAddrAcceptsPortOnly(t *testing.T) {
 	}
 }
 
+func TestHandleModelsReturnsOpenAIModelList(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	handleModels(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"deepseek-v4-flash"`) ||
+		!strings.Contains(rec.Body.String(), `"id":"deepseek-v4-pro"`) {
+		t.Fatalf("models response = %s", rec.Body.String())
+	}
+}
+
 func TestNormalizeRequestSortsToolsAndRecordsDebugTrace(t *testing.T) {
 	body := []byte(`{
 		"model":"deepseek-v4-flash",

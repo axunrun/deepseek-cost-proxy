@@ -125,6 +125,7 @@ func main() {
 	metrics := newMetricsStore(cfg.traceDir)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1", handleRoot)
+	mux.HandleFunc("/v1/models", handleModels)
 	mux.HandleFunc("/v1/", handleRoot)
 	mux.HandleFunc("/healthz", handleHealth)
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
@@ -200,6 +201,20 @@ func handleRoot(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":   "deepseek-cost-proxy",
 		"models": []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+	})
+}
+
+func handleModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"object": "list",
+		"data": []map[string]any{
+			{"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
+			{"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"},
+		},
 	})
 }
 
