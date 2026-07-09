@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -561,22 +560,10 @@ type pricing struct {
 
 func pricingForModel() pricing {
 	return pricing{
-		CacheHit: envFloatOrDefault("DEEPSEEK_PRICE_CACHE_HIT_CNY_PER_MTOK", 0.02),
-		Input:    envFloatOrDefault("DEEPSEEK_PRICE_INPUT_CNY_PER_MTOK", 1),
-		Output:   envFloatOrDefault("DEEPSEEK_PRICE_OUTPUT_CNY_PER_MTOK", 2),
+		CacheHit: 0.02,
+		Input:    1,
+		Output:   2,
 	}
-}
-
-func envFloatOrDefault(name string, fallback float64) float64 {
-	value := strings.TrimSpace(os.Getenv(name))
-	if value == "" {
-		return fallback
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	if err != nil || parsed < 0 {
-		return fallback
-	}
-	return parsed
 }
 
 func estimateCostCNY(u usage) float64 {

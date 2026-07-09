@@ -23,6 +23,10 @@ api_key = local-proxy-key
 model = deepseek-v4-flash
 ```
 
+Use `deepseek-v4-flash` as the low-cost default. Use `deepseek-v4-pro` by
+setting the request `model` to `deepseek-v4-pro`, or by creating a second Hermes
+model entry with the same `base_url` and `api_key`.
+
 ## Docker / Unraid
 
 Local build:
@@ -61,9 +65,6 @@ Environment variables:
 | `PROXY_ADDR` | no | `18188` | Listen port inside the container. Host-style values like `:18188` still work. |
 | `TRACE_DIR` | no | `/data/traces` in compose | JSONL metrics/debug trace directory. |
 | `DEEPSEEK_CHAT_URL` | no | `https://api.deepseek.com/chat/completions` | DeepSeek upstream URL. |
-| `DEEPSEEK_PRICE_CACHE_HIT_CNY_PER_MTOK` | no | `0.02` | Cached input estimate per 1M tokens. |
-| `DEEPSEEK_PRICE_INPUT_CNY_PER_MTOK` | no | `1` | New input estimate per 1M tokens. |
-| `DEEPSEEK_PRICE_OUTPUT_CNY_PER_MTOK` | no | `2` | Output estimate per 1M tokens. |
 
 Persistent data:
 
@@ -98,8 +99,7 @@ The WebUI has two tabs: Dashboard and Prompt Debug. Dashboard shows recent
 requests, prompt tokens, cached tokens, new tokens, cache hit rate, estimated
 cost, and estimated savings. Both buffered and streaming responses are tracked
 when the upstream response includes usage data.
-The cost fields are estimates; update the price environment variables when the
-DeepSeek price table changes.
+The cost fields are estimates based on the hardcoded CNY pricing in `main.go`.
 
 Open the debug tab directly:
 
