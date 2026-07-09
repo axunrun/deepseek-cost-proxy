@@ -37,6 +37,20 @@ func TestNormalizeRequestRejectsUnsupportedModel(t *testing.T) {
 	}
 }
 
+func TestListenAddrAcceptsPortOnly(t *testing.T) {
+	tests := map[string]string{
+		"":                ":18188",
+		"18188":           ":18188",
+		":18188":          ":18188",
+		"127.0.0.1:18188": "127.0.0.1:18188",
+	}
+	for input, want := range tests {
+		if got := listenAddr(input); got != want {
+			t.Fatalf("listenAddr(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestNormalizeRequestSortsToolsAndRecordsDebugTrace(t *testing.T) {
 	body := []byte(`{
 		"model":"deepseek-v4-flash",

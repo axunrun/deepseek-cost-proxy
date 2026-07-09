@@ -58,7 +58,7 @@ Environment variables:
 | `DEEPSEEK_API_KEY` | yes | none | Real DeepSeek key, stored only in Docker env. |
 | `PROXY_AUTH_KEY` | no | `local-proxy-key` | LAN proxy key used by Hermes. |
 | `DEFAULT_MODEL` | no | `deepseek-v4-flash` | Default model when Hermes omits `model`. |
-| `PROXY_ADDR` | no | `:18188` | Listen address inside the container. |
+| `PROXY_ADDR` | no | `18188` | Listen port inside the container. Host-style values like `:18188` still work. |
 | `TRACE_DIR` | no | `/data/traces` in compose | JSONL metrics/debug trace directory. |
 | `DEEPSEEK_CHAT_URL` | no | `https://api.deepseek.com/chat/completions` | DeepSeek upstream URL. |
 | `DEEPSEEK_PRICE_CACHE_HIT_CNY_PER_MTOK` | no | `0.02` | Cached input estimate per 1M tokens. |

@@ -20,7 +20,7 @@ import (
 )
 
 const (
-	defaultAddr        = ":18188"
+	defaultPort        = "18188"
 	defaultDeepSeekURL = "https://api.deepseek.com/chat/completions"
 )
 
@@ -159,7 +159,7 @@ func main() {
 
 func loadConfig() (config, error) {
 	cfg := config{
-		addr:         envOrDefault("PROXY_ADDR", defaultAddr),
+		addr:         listenAddr(envOrDefault("PROXY_ADDR", defaultPort)),
 		proxyAuthKey: os.Getenv("PROXY_AUTH_KEY"),
 		defaultModel: envOrDefault("DEFAULT_MODEL", "deepseek-v4-flash"),
 		deepSeekURL:  envOrDefault("DEEPSEEK_CHAT_URL", defaultDeepSeekURL),
@@ -173,6 +173,17 @@ func loadConfig() (config, error) {
 		return cfg, fmt.Errorf("DEFAULT_MODEL %q is not supported", cfg.defaultModel)
 	}
 	return cfg, nil
+}
+
+func listenAddr(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ":" + defaultPort
+	}
+	if strings.Contains(value, ":") {
+		return value
+	}
+	return ":" + value
 }
 
 func envOrDefault(name, fallback string) string {
