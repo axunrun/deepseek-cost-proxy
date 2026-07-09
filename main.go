@@ -936,7 +936,7 @@ const dashboardHTML = `<!doctype html>
           <tr>
             <th>ID</th><th>时间</th><th>模型</th><th>状态</th><th>输入</th>
             <th>缓存</th><th>新输入</th><th>命中率</th><th>流式</th>
-            <th>原始前缀</th><th>优化后前缀</th><th>工具</th><th>节省</th>
+            <th>原始前缀</th><th>优化后前缀</th><th>工具</th><th>费用</th><th>节省</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -998,6 +998,7 @@ const dashboardHTML = `<!doctype html>
           '<td>' + esc(item.rawPrefixHash || '') + '</td>' +
           '<td>' + esc(item.normalizedPrefixHash || '') + '</td>' +
           '<td>' + (item.toolsChanged ? '已排序' : '未变化') + '</td>' +
+          '<td>CNY ' + (item.estimatedCostCNY || 0).toFixed(6) + '</td>' +
           '<td>CNY ' + (item.estimatedSavedCNY || 0).toFixed(6) + '</td>' +
         '</tr>';
       }).join('');
