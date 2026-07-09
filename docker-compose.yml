@@ -9,6 +9,7 @@ services:
       PROXY_ADDR: "18188"
       DEFAULT_MODEL: "deepseek-v4-flash"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      MINIMAX_API_KEY: "${MINIMAX_API_KEY:-}"
       PROXY_AUTH_KEY: "${PROXY_AUTH_KEY:-local-proxy-key}"
       TRACE_DIR: "/data/traces"
     volumes:

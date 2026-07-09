@@ -21,32 +21,44 @@ import (
 const (
 	defaultPort        = "18188"
 	defaultDeepSeekURL = "https://api.deepseek.com/chat/completions"
+	defaultMiniMaxURL  = "https://api.minimax.io/v1/chat/completions"
 )
 
-var allowedModels = map[string]bool{
-	"deepseek-v4-flash": true,
-	"deepseek-v4-pro":   true,
+type modelConfig struct {
+	ID       string
+	Provider string
+	ChatURL  string
+	APIKey   string
 }
 
 type config struct {
 	addr         string
-	deepSeekKey  string
 	proxyAuthKey string
 	defaultModel string
-	deepSeekURL  string
 	traceDir     string
+	models       map[string]modelConfig
+	modelOrder   []string
+	supported    map[string]bool
 }
 
 type chatRequest struct {
 	Model string `json:"model"`
 }
 
+type tokenDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
 type usage struct {
-	PromptTokens          int `json:"prompt_tokens"`
-	CompletionTokens      int `json:"completion_tokens"`
-	TotalTokens           int `json:"total_tokens"`
-	PromptCacheHitTokens  int `json:"prompt_cache_hit_tokens"`
-	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
+	PromptTokens          int           `json:"prompt_tokens"`
+	CompletionTokens      int           `json:"completion_tokens"`
+	TotalTokens           int           `json:"total_tokens"`
+	PromptCacheHitTokens  int           `json:"prompt_cache_hit_tokens"`
+	PromptCacheMissTokens int           `json:"prompt_cache_miss_tokens"`
+	PromptTokensDetails   *tokenDetails `json:"prompt_tokens_details"`
+	InputTokens           int           `json:"input_tokens"`
+	OutputTokens          int           `json:"output_tokens"`
+	InputTokensDetails    *tokenDetails `json:"input_tokens_details"`
 }
 
 type bufferedResponse struct {
@@ -88,6 +100,9 @@ type requestMetric struct {
 	SystemChanged         bool      `json:"systemChanged"`
 	PrefixChanged         bool      `json:"prefixChanged"`
 	PrefixChangeReasons   []string  `json:"prefixChangeReasons,omitempty"`
+	Currency              string    `json:"currency"`
+	EstimatedCost         float64   `json:"estimatedCost"`
+	EstimatedSaved        float64   `json:"estimatedSaved"`
 	EstimatedCostCNY      float64   `json:"estimatedCostCNY"`
 	EstimatedSavedCNY     float64   `json:"estimatedSavedCNY"`
 }
@@ -129,9 +144,15 @@ func main() {
 
 	metrics := newMetricsStore(cfg.traceDir)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1", handleRoot)
-	mux.HandleFunc("/v1/models", handleModels)
-	mux.HandleFunc("/v1/", handleRoot)
+	mux.HandleFunc("/v1", func(w http.ResponseWriter, r *http.Request) {
+		handleRoot(cfg, w, r)
+	})
+	mux.HandleFunc("/v1/models", func(w http.ResponseWriter, r *http.Request) {
+		handleModels(cfg, w, r)
+	})
+	mux.HandleFunc("/v1/", func(w http.ResponseWriter, r *http.Request) {
+		handleRoot(cfg, w, r)
+	})
 	mux.HandleFunc("/healthz", handleHealth)
 	mux.HandleFunc("/metrics", func(w http.ResponseWriter, r *http.Request) {
 		handleMetrics(metrics, w, r)
@@ -170,17 +191,44 @@ func loadConfig() (config, error) {
 		addr:         listenAddr(envOrDefault("PROXY_ADDR", defaultPort)),
 		proxyAuthKey: os.Getenv("PROXY_AUTH_KEY"),
 		defaultModel: envOrDefault("DEFAULT_MODEL", "deepseek-v4-flash"),
-		deepSeekURL:  envOrDefault("DEEPSEEK_CHAT_URL", defaultDeepSeekURL),
-		deepSeekKey:  os.Getenv("DEEPSEEK_API_KEY"),
 		traceDir:     envOrDefault("TRACE_DIR", "traces"),
+		models:       map[string]modelConfig{},
+		supported: map[string]bool{
+			"deepseek-v4-flash": true,
+			"deepseek-v4-pro":   true,
+			"MiniMax-M3":        true,
+		},
 	}
-	if cfg.deepSeekKey == "" {
-		return cfg, errors.New("DEEPSEEK_API_KEY is required")
+	deepSeekKey := os.Getenv("DEEPSEEK_API_KEY")
+	if deepSeekKey != "" {
+		deepSeekURL := envOrDefault("DEEPSEEK_CHAT_URL", defaultDeepSeekURL)
+		cfg.addModel("deepseek-v4-flash", "deepseek", deepSeekURL, deepSeekKey)
+		cfg.addModel("deepseek-v4-pro", "deepseek", deepSeekURL, deepSeekKey)
 	}
-	if !allowedModels[cfg.defaultModel] {
+	miniMaxKey := os.Getenv("MINIMAX_API_KEY")
+	if miniMaxKey != "" {
+		cfg.addModel("MiniMax-M3", "minimax", envOrDefault("MINIMAX_CHAT_URL", defaultMiniMaxURL), miniMaxKey)
+	}
+	if len(cfg.models) == 0 {
+		return cfg, errors.New("DEEPSEEK_API_KEY or MINIMAX_API_KEY is required")
+	}
+	if !cfg.supported[cfg.defaultModel] {
 		return cfg, fmt.Errorf("DEFAULT_MODEL %q is not supported", cfg.defaultModel)
 	}
+	if _, ok := cfg.models[cfg.defaultModel]; !ok {
+		return cfg, fmt.Errorf("DEFAULT_MODEL %q is not configured", cfg.defaultModel)
+	}
 	return cfg, nil
+}
+
+func (cfg *config) addModel(id, provider, chatURL, apiKey string) {
+	cfg.models[id] = modelConfig{
+		ID:       id,
+		Provider: provider,
+		ChatURL:  chatURL,
+		APIKey:   apiKey,
+	}
+	cfg.modelOrder = append(cfg.modelOrder, id)
 }
 
 func listenAddr(value string) string {
@@ -202,24 +250,26 @@ func envOrDefault(name, fallback string) string {
 	return value
 }
 
-func handleRoot(w http.ResponseWriter, _ *http.Request) {
+func handleRoot(cfg config, w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":   "deepseek-cost-proxy",
-		"models": []string{"deepseek-v4-flash", "deepseek-v4-pro"},
+		"models": cfg.modelOrder,
 	})
 }
 
-func handleModels(w http.ResponseWriter, r *http.Request) {
+func handleModels(cfg config, w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	models := make([]map[string]any, 0, len(cfg.modelOrder))
+	for _, id := range cfg.modelOrder {
+		model := cfg.models[id]
+		models = append(models, map[string]any{"id": id, "object": "model", "owned_by": model.Provider})
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"object": "list",
-		"data": []map[string]any{
-			{"id": "deepseek-v4-flash", "object": "model", "owned_by": "deepseek"},
-			{"id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek"},
-		},
+		"data":   models,
 	})
 }
 
@@ -243,26 +293,31 @@ func handleChatCompletions(cfg config, metrics *metricsStore, w http.ResponseWri
 		return
 	}
 
-	normalized, err := normalizeRequest(body, cfg.defaultModel)
+	normalized, err := normalizeRequest(body, cfg.defaultModel, cfg.supported)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	upstream, ok := cfg.models[normalized.model]
+	if !ok {
+		http.Error(w, fmt.Sprintf("model %q is not configured", normalized.model), http.StatusBadRequest)
+		return
+	}
 
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, cfg.deepSeekURL, bytes.NewReader(normalized.body))
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, upstream.ChatURL, bytes.NewReader(normalized.body))
 	if err != nil {
 		http.Error(w, "build upstream request: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+cfg.deepSeekKey)
+	req.Header.Set("Authorization", "Bearer "+upstream.APIKey)
 	if accept := r.Header.Get("Accept"); accept != "" {
 		req.Header.Set("Accept", accept)
 	}
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		http.Error(w, "deepseek request: "+err.Error(), http.StatusBadGateway)
+		http.Error(w, "upstream request: "+err.Error(), http.StatusBadGateway)
 		return
 	}
 	defer resp.Body.Close()
@@ -301,7 +356,7 @@ func authorized(cfg config, r *http.Request) bool {
 	return auth == "Bearer "+cfg.proxyAuthKey
 }
 
-func normalizeRequest(body []byte, defaultModel string) (normalizedRequest, error) {
+func normalizeRequest(body []byte, defaultModel string, supportedModels map[string]bool) (normalizedRequest, error) {
 	var raw map[string]any
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return normalizedRequest{}, fmt.Errorf("invalid JSON: %w", err)
@@ -314,8 +369,8 @@ func normalizeRequest(body []byte, defaultModel string) (normalizedRequest, erro
 		model = defaultModel
 		raw["model"] = model
 	}
-	if !allowedModels[model] {
-		return normalizedRequest{}, fmt.Errorf("unsupported model %q; use deepseek-v4-flash or deepseek-v4-pro", model)
+	if !supportedModels[model] {
+		return normalizedRequest{}, fmt.Errorf("unsupported model %q", model)
 	}
 
 	stream, _ := raw["stream"].(bool)
@@ -552,7 +607,7 @@ func updateMetricFromSSEData(metric *requestMetric, data string) {
 
 func metricFromResponse(model string, stream bool, status int, body []byte) requestMetric {
 	var parsed bufferedResponse
-	if err := json.Unmarshal(body, &parsed); err != nil || parsed.Usage.TotalTokens == 0 {
+	if err := json.Unmarshal(body, &parsed); err != nil || usageTotalTokens(parsed.Usage) == 0 {
 		return requestMetric{
 			Time:   time.Now(),
 			Model:  model,
@@ -571,21 +626,55 @@ func metricFromResponse(model string, stream bool, status int, body []byte) requ
 }
 
 func applyUsage(metric *requestMetric, u usage) {
+	normalized := normalizeUsage(u)
 	hitRate := 0.0
-	if u.PromptTokens > 0 {
-		hitRate = float64(u.PromptCacheHitTokens) / float64(u.PromptTokens)
+	if normalized.PromptTokens > 0 {
+		hitRate = float64(normalized.PromptCacheHitTokens) / float64(normalized.PromptTokens)
 	}
-	metric.PromptTokens = u.PromptTokens
-	metric.CompletionTokens = u.CompletionTokens
-	metric.TotalTokens = u.TotalTokens
-	metric.PromptCacheHitTokens = u.PromptCacheHitTokens
-	metric.PromptCacheMissTokens = u.PromptCacheMissTokens
+	metric.PromptTokens = normalized.PromptTokens
+	metric.CompletionTokens = normalized.CompletionTokens
+	metric.TotalTokens = normalized.TotalTokens
+	metric.PromptCacheHitTokens = normalized.PromptCacheHitTokens
+	metric.PromptCacheMissTokens = normalized.PromptCacheMissTokens
 	metric.HitRate = hitRate
-	metric.EstimatedCostCNY = estimateCostCNY(metric.Model, u)
-	metric.EstimatedSavedCNY = estimateSavedCNY(metric.Model, u)
+	rate := pricingForModel(metric.Model)
+	metric.Currency = rate.Currency
+	metric.EstimatedCost = estimateCost(rate, normalized)
+	metric.EstimatedSaved = estimateSaved(rate, normalized)
+	if rate.Currency == "CNY" {
+		metric.EstimatedCostCNY = metric.EstimatedCost
+		metric.EstimatedSavedCNY = metric.EstimatedSaved
+	}
+}
+
+func normalizeUsage(u usage) usage {
+	if u.PromptTokens == 0 {
+		u.PromptTokens = u.InputTokens
+	}
+	if u.CompletionTokens == 0 {
+		u.CompletionTokens = u.OutputTokens
+	}
+	if u.PromptCacheHitTokens == 0 && u.PromptTokensDetails != nil {
+		u.PromptCacheHitTokens = u.PromptTokensDetails.CachedTokens
+	}
+	if u.PromptCacheHitTokens == 0 && u.InputTokensDetails != nil {
+		u.PromptCacheHitTokens = u.InputTokensDetails.CachedTokens
+	}
+	if u.PromptCacheMissTokens == 0 && u.PromptTokens > u.PromptCacheHitTokens {
+		u.PromptCacheMissTokens = u.PromptTokens - u.PromptCacheHitTokens
+	}
+	if u.TotalTokens == 0 {
+		u.TotalTokens = u.PromptTokens + u.CompletionTokens
+	}
+	return u
+}
+
+func usageTotalTokens(u usage) int {
+	return normalizeUsage(u).TotalTokens
 }
 
 type pricing struct {
+	Currency string
 	CacheHit float64
 	Input    float64
 	Output   float64
@@ -595,12 +684,21 @@ func pricingForModel(model string) pricing {
 	switch model {
 	case "deepseek-v4-pro":
 		return pricing{
+			Currency: "CNY",
 			CacheHit: 0.025,
 			Input:    3,
 			Output:   6,
 		}
+	case "MiniMax-M3":
+		return pricing{
+			Currency: "USD",
+			CacheHit: 0.06,
+			Input:    0.30,
+			Output:   1.20,
+		}
 	default:
 		return pricing{
+			Currency: "CNY",
 			CacheHit: 0.02,
 			Input:    1,
 			Output:   2,
@@ -610,16 +708,30 @@ func pricingForModel(model string) pricing {
 
 func estimateCostCNY(model string, u usage) float64 {
 	rate := pricingForModel(model)
+	if rate.Currency != "CNY" {
+		return 0
+	}
+	return estimateCost(rate, normalizeUsage(u))
+}
+
+func estimateCost(rate pricing, u usage) float64 {
 	return (float64(u.PromptCacheHitTokens)*rate.CacheHit +
 		float64(u.PromptCacheMissTokens)*rate.Input +
 		float64(u.CompletionTokens)*rate.Output) / 1_000_000
 }
 
 func estimateSavedCNY(model string, u usage) float64 {
+	rate := pricingForModel(model)
+	if rate.Currency != "CNY" {
+		return 0
+	}
+	return estimateSaved(rate, normalizeUsage(u))
+}
+
+func estimateSaved(rate pricing, u usage) float64 {
 	if u.PromptCacheHitTokens <= 0 {
 		return 0
 	}
-	rate := pricingForModel(model)
 	return float64(u.PromptCacheHitTokens) * (rate.Input - rate.CacheHit) / 1_000_000
 }
 
@@ -767,12 +879,28 @@ func (s *metricsStore) snapshot() map[string]any {
 	totalNew := 0
 	totalCost := 0.0
 	totalSaved := 0.0
+	costByCurrency := map[string]float64{}
+	savedByCurrency := map[string]float64{}
 	for _, item := range requests {
 		totalPrompt += item.PromptTokens
 		totalCached += item.PromptCacheHitTokens
 		totalNew += item.PromptCacheMissTokens
 		totalCost += item.EstimatedCostCNY
 		totalSaved += item.EstimatedSavedCNY
+		currency := item.Currency
+		if currency == "" {
+			currency = "CNY"
+		}
+		cost := item.EstimatedCost
+		saved := item.EstimatedSaved
+		if cost == 0 && currency == "CNY" {
+			cost = item.EstimatedCostCNY
+		}
+		if saved == 0 && currency == "CNY" {
+			saved = item.EstimatedSavedCNY
+		}
+		costByCurrency[currency] += cost
+		savedByCurrency[currency] += saved
 	}
 	hitRate := 0.0
 	if totalPrompt > 0 {
@@ -780,13 +908,15 @@ func (s *metricsStore) snapshot() map[string]any {
 	}
 	return map[string]any{
 		"summary": map[string]any{
-			"requests":     len(requests),
-			"promptTokens": totalPrompt,
-			"cachedTokens": totalCached,
-			"newTokens":    totalNew,
-			"hitRate":      hitRate,
-			"costCNY":      totalCost,
-			"savedCNY":     totalSaved,
+			"requests":        len(requests),
+			"promptTokens":    totalPrompt,
+			"cachedTokens":    totalCached,
+			"newTokens":       totalNew,
+			"hitRate":         hitRate,
+			"costCNY":         totalCost,
+			"savedCNY":        totalSaved,
+			"costByCurrency":  costByCurrency,
+			"savedByCurrency": savedByCurrency,
 		},
 		"requests": requests,
 	}
@@ -991,7 +1121,7 @@ const dashboardHTML = `<!doctype html>
         <div class="meta" id="debugMeta"></div>
         <h3>Hermes 原始请求预览</h3>
         <pre id="rawPreview">{}</pre>
-        <h3>发送给 DeepSeek 的请求预览</h3>
+        <h3>发送给上游模型的请求预览</h3>
         <pre id="normalizedPreview">{}</pre>
       </section>
     </section>
@@ -1004,6 +1134,14 @@ const dashboardHTML = `<!doctype html>
       }[ch]));
     }
     function pct(v) { return ((v || 0) * 100).toFixed(1) + '%'; }
+    function money(currency, value) {
+      return (currency || 'CNY') + ' ' + (value || 0).toFixed(6);
+    }
+    function moneyMap(values, fallbackCurrency, fallbackValue) {
+      const entries = Object.entries(values || {}).filter(([, value]) => value);
+      if (!entries.length) return money(fallbackCurrency, fallbackValue);
+      return entries.map(([currency, value]) => money(currency, value)).join(' / ');
+    }
     function prefixReason(item) {
       const reasons = item.prefixChangeReasons || [];
       return reasons.length ? esc(reasons.join(', ')) : '稳定';
@@ -1025,9 +1163,12 @@ const dashboardHTML = `<!doctype html>
       document.querySelector('#prompt').textContent = fmt.format(s.promptTokens);
       document.querySelector('#cached').textContent = fmt.format(s.cachedTokens) + ' / ' + fmt.format(s.newTokens);
       document.querySelector('#hitRate').textContent = pct(s.hitRate);
-      document.querySelector('#cost').textContent = 'CNY ' + (s.costCNY || 0).toFixed(6);
-      document.querySelector('#saved').textContent = 'CNY ' + (s.savedCNY || 0).toFixed(6);
+      document.querySelector('#cost').textContent = moneyMap(s.costByCurrency, 'CNY', s.costCNY);
+      document.querySelector('#saved').textContent = moneyMap(s.savedByCurrency, 'CNY', s.savedCNY);
       const rows = [...data.requests].reverse().map(item => {
+        const currency = item.currency || 'CNY';
+        const cost = item.estimatedCost || item.estimatedCostCNY || 0;
+        const saved = item.estimatedSaved || item.estimatedSavedCNY || 0;
         return '<tr>' +
           '<td>' + item.id + '</td>' +
           '<td>' + new Date(item.time).toLocaleTimeString() + '</td>' +
@@ -1042,8 +1183,8 @@ const dashboardHTML = `<!doctype html>
           '<td>' + esc(item.normalizedPrefixHash || '') + '</td>' +
           '<td>' + (item.toolsChanged ? '已排序' : '未变化') + '</td>' +
           '<td>' + prefixReason(item) + '</td>' +
-          '<td>CNY ' + (item.estimatedCostCNY || 0).toFixed(6) + '</td>' +
-          '<td>CNY ' + (item.estimatedSavedCNY || 0).toFixed(6) + '</td>' +
+          '<td>' + money(currency, cost) + '</td>' +
+          '<td>' + money(currency, saved) + '</td>' +
         '</tr>';
       }).join('');
       document.querySelector('#rows').innerHTML = rows;

@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,10 +14,34 @@ import (
 	"time"
 )
 
+func testSupportedModels() map[string]bool {
+	return map[string]bool{
+		"deepseek-v4-flash": true,
+		"deepseek-v4-pro":   true,
+		"MiniMax-M3":        true,
+	}
+}
+
+func testConfig(deepSeekKey, miniMaxKey string) config {
+	cfg := config{
+		defaultModel: "deepseek-v4-flash",
+		models:       map[string]modelConfig{},
+		supported:    testSupportedModels(),
+	}
+	if deepSeekKey != "" {
+		cfg.addModel("deepseek-v4-flash", "deepseek", "https://deepseek.test/chat", deepSeekKey)
+		cfg.addModel("deepseek-v4-pro", "deepseek", "https://deepseek.test/chat", deepSeekKey)
+	}
+	if miniMaxKey != "" {
+		cfg.addModel("MiniMax-M3", "minimax", "https://minimax.test/chat", miniMaxKey)
+	}
+	return cfg
+}
+
 func TestNormalizeRequestAddsDefaultModelAndStreamUsage(t *testing.T) {
 	body := []byte(`{"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
 
-	normalized, err := normalizeRequest(body, "deepseek-v4-flash")
+	normalized, err := normalizeRequest(body, "deepseek-v4-flash", testSupportedModels())
 	if err != nil {
 		t.Fatalf("normalizeRequest: %v", err)
 	}
@@ -31,7 +57,7 @@ func TestNormalizeRequestAddsDefaultModelAndStreamUsage(t *testing.T) {
 }
 
 func TestNormalizeRequestRejectsUnsupportedModel(t *testing.T) {
-	_, err := normalizeRequest([]byte(`{"model":"other"}`), "deepseek-v4-flash")
+	_, err := normalizeRequest([]byte(`{"model":"other"}`), "deepseek-v4-flash", testSupportedModels())
 	if err == nil {
 		t.Fatal("expected unsupported model error")
 	}
@@ -55,13 +81,29 @@ func TestHandleModelsReturnsOpenAIModelList(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
 	rec := httptest.NewRecorder()
 
-	handleModels(rec, req)
+	handleModels(testConfig("sk-test", ""), rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), `"id":"deepseek-v4-flash"`) ||
-		!strings.Contains(rec.Body.String(), `"id":"deepseek-v4-pro"`) {
+		!strings.Contains(rec.Body.String(), `"id":"deepseek-v4-pro"`) ||
+		strings.Contains(rec.Body.String(), `"id":"MiniMax-M3"`) {
+		t.Fatalf("models response = %s", rec.Body.String())
+	}
+}
+
+func TestHandleModelsIncludesConfiguredMiniMax(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	handleModels(testConfig("sk-test", "sk-mini"), rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"MiniMax-M3"`) ||
+		!strings.Contains(rec.Body.String(), `"owned_by":"minimax"`) {
 		t.Fatalf("models response = %s", rec.Body.String())
 	}
 }
@@ -76,7 +118,7 @@ func TestNormalizeRequestSortsToolsAndRecordsDebugTrace(t *testing.T) {
 		]
 	}`)
 
-	normalized, err := normalizeRequest(body, "deepseek-v4-flash")
+	normalized, err := normalizeRequest(body, "deepseek-v4-flash", testSupportedModels())
 	if err != nil {
 		t.Fatalf("normalizeRequest: %v", err)
 	}
@@ -151,6 +193,34 @@ func TestApplyUsageUsesModelPricing(t *testing.T) {
 	}
 	if pro.EstimatedCostCNY != 9.025 || pro.EstimatedSavedCNY != 2.975 {
 		t.Fatalf("pro cost = %+v", pro)
+	}
+}
+
+func TestApplyUsageReadsOpenAIStyleCachedTokens(t *testing.T) {
+	u := usage{
+		PromptTokens:     100,
+		CompletionTokens: 5,
+		TotalTokens:      105,
+		PromptTokensDetails: &tokenDetails{
+			CachedTokens: 80,
+		},
+	}
+	metric := requestMetric{Model: "MiniMax-M3"}
+
+	applyUsage(&metric, u)
+
+	if metric.PromptCacheHitTokens != 80 || metric.PromptCacheMissTokens != 20 {
+		t.Fatalf("metric = %+v", metric)
+	}
+	if metric.Currency != "USD" {
+		t.Fatalf("currency = %q", metric.Currency)
+	}
+	if math.Abs(metric.EstimatedCost-0.0000168) > 0.000000001 ||
+		math.Abs(metric.EstimatedSaved-0.0000192) > 0.000000001 {
+		t.Fatalf("cost = %+v", metric)
+	}
+	if metric.EstimatedCostCNY != 0 || metric.EstimatedSavedCNY != 0 {
+		t.Fatalf("MiniMax should not be folded into CNY totals: %+v", metric)
 	}
 }
 
@@ -248,13 +318,15 @@ func TestHandleChatCompletionsPersistsTrace(t *testing.T) {
 	defer upstream.Close()
 
 	traceDir := t.TempDir()
-	cfg := config{
-		deepSeekKey:  "sk-test",
-		proxyAuthKey: "local-proxy-key",
-		defaultModel: "deepseek-v4-flash",
-		deepSeekURL:  upstream.URL,
-		traceDir:     traceDir,
+	cfg := testConfig("sk-test", "")
+	cfg.proxyAuthKey = "local-proxy-key"
+	cfg.models["deepseek-v4-flash"] = modelConfig{
+		ID:       "deepseek-v4-flash",
+		Provider: "deepseek",
+		ChatURL:  upstream.URL,
+		APIKey:   "sk-test",
 	}
+	cfg.traceDir = traceDir
 	metrics := newMetricsStore(traceDir)
 	body := `{
 		"model":"deepseek-v4-flash",
@@ -295,6 +367,63 @@ func TestHandleChatCompletionsPersistsTrace(t *testing.T) {
 	}
 	if persisted.Metric.PromptCacheHitTokens != 80 || persisted.Trace.ID != 1 {
 		t.Fatalf("persisted = %+v", persisted)
+	}
+}
+
+func TestHandleChatCompletionsRoutesMiniMaxModel(t *testing.T) {
+	var upstreamAuth string
+	var upstreamBody string
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamAuth = r.Header.Get("Authorization")
+		data, _ := io.ReadAll(r.Body)
+		upstreamBody = string(data)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"mini",
+			"choices":[{"message":{"role":"assistant","content":"OK"}}],
+			"usage":{
+				"prompt_tokens":100,
+				"completion_tokens":5,
+				"total_tokens":105,
+				"prompt_tokens_details":{"cached_tokens":80}
+			}
+		}`))
+	}))
+	defer upstream.Close()
+
+	cfg := testConfig("", "sk-mini")
+	cfg.defaultModel = "MiniMax-M3"
+	cfg.proxyAuthKey = "local-proxy-key"
+	cfg.models["MiniMax-M3"] = modelConfig{
+		ID:       "MiniMax-M3",
+		Provider: "minimax",
+		ChatURL:  upstream.URL,
+		APIKey:   "sk-mini",
+	}
+	metrics := newMetricsStore(t.TempDir())
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/completions",
+		strings.NewReader(`{"model":"MiniMax-M3","messages":[{"role":"user","content":"hi"}]}`),
+	)
+	req.Header.Set("Authorization", "Bearer local-proxy-key")
+	rec := httptest.NewRecorder()
+
+	handleChatCompletions(cfg, metrics, rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if upstreamAuth != "Bearer sk-mini" {
+		t.Fatalf("upstream auth = %q", upstreamAuth)
+	}
+	if !strings.Contains(upstreamBody, `"model":"MiniMax-M3"`) {
+		t.Fatalf("upstream body = %s", upstreamBody)
+	}
+	summary := metrics.snapshot()["summary"].(map[string]any)
+	costByCurrency := summary["costByCurrency"].(map[string]float64)
+	if costByCurrency["USD"] == 0 {
+		t.Fatalf("summary = %+v", summary)
 	}
 }
 

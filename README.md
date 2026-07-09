@@ -1,6 +1,8 @@
-# DeepSeek Cost Proxy
+# DeepSeek / MiniMax Cost Proxy
 
-OpenAI-compatible local proxy for Hermes or other agents.
+OpenAI-compatible local proxy for Hermes or other agents. It normalizes stable
+prompt prefixes, forwards requests to the configured upstream model, and records
+token/cache/cost metrics in one WebUI.
 
 ## Models
 
@@ -8,6 +10,11 @@ Supported models:
 
 - `deepseek-v4-flash`
 - `deepseek-v4-pro`
+- `MiniMax-M3`
+
+Configured models are exposed through `GET /v1/models`. If only
+`DEEPSEEK_API_KEY` is set, only DeepSeek models are visible. If
+`MINIMAX_API_KEY` is also set, `MiniMax-M3` is visible in the same model list.
 
 ## Run
 
@@ -27,6 +34,14 @@ Use `deepseek-v4-flash` as the low-cost default. Use `deepseek-v4-pro` by
 setting the request `model` to `deepseek-v4-pro`, or by creating a second Hermes
 model entry with the same `base_url` and `api_key`.
 
+Use MiniMax by adding `MINIMAX_API_KEY` to the container and setting the request
+`model` to `MiniMax-M3`. If the container only has a MiniMax key and no DeepSeek
+key, set:
+
+```text
+DEFAULT_MODEL=MiniMax-M3
+```
+
 Thinking mode is enabled by default in DeepSeek V4. To disable it, send:
 
 ```json
@@ -42,12 +57,16 @@ To keep thinking mode and control effort, send:
 `reasoning_effort` also accepts `max`. When thinking mode is used with tool
 calls, callers must preserve and send back `reasoning_content` in later turns.
 
-Hardcoded CNY pricing estimate per 1M tokens:
+Hardcoded pricing estimate per 1M tokens:
 
-| Model | Cache hit input | Cache miss input | Output |
-| --- | ---: | ---: | ---: |
-| `deepseek-v4-flash` | 0.02 | 1 | 2 |
-| `deepseek-v4-pro` | 0.025 | 3 | 6 |
+| Model | Currency | Cache hit input | Cache miss input | Output |
+| --- | --- | ---: | ---: | ---: |
+| `deepseek-v4-flash` | CNY | 0.02 | 1 | 2 |
+| `deepseek-v4-pro` | CNY | 0.025 | 3 | 6 |
+| `MiniMax-M3` | USD | 0.06 | 0.30 | 1.20 |
+
+MiniMax uses its standard Pay-as-you-go prices for the <=512k input tier. The
+dashboard keeps CNY and USD totals separate instead of adding them together.
 
 ## Docker / Unraid
 
@@ -81,12 +100,17 @@ Environment variables:
 
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
-| `DEEPSEEK_API_KEY` | yes | none | Real DeepSeek key, stored only in Docker env. |
+| `DEEPSEEK_API_KEY` | no* | none | Real DeepSeek key, stored only in Docker env. |
+| `MINIMAX_API_KEY` | no* | none | Real MiniMax key, stored only in Docker env. |
 | `PROXY_AUTH_KEY` | no | `local-proxy-key` | LAN proxy key used by Hermes. |
 | `DEFAULT_MODEL` | no | `deepseek-v4-flash` | Default model when Hermes omits `model`. |
 | `PROXY_ADDR` | no | `18188` | Listen port inside the container. Host-style values like `:18188` still work. |
 | `TRACE_DIR` | no | `/data/traces` in compose | JSONL metrics/debug trace directory. |
 | `DEEPSEEK_CHAT_URL` | no | `https://api.deepseek.com/chat/completions` | DeepSeek upstream URL. |
+| `MINIMAX_CHAT_URL` | no | `https://api.minimax.io/v1/chat/completions` | MiniMax upstream URL. |
+
+`DEEPSEEK_API_KEY` and `MINIMAX_API_KEY` are optional individually, but at least
+one of them must be set. `DEFAULT_MODEL` must point to a configured model.
 
 Persistent data:
 
@@ -134,7 +158,7 @@ The WebUI has two tabs: 数据看板 and Prompt 调试. 数据看板 shows recen
 requests, prompt tokens, cached tokens, new tokens, cache hit rate, estimated
 cost, and estimated savings. Both buffered and streaming responses are tracked
 when the upstream response includes usage data.
-The cost fields are estimates based on the hardcoded CNY pricing in `main.go`.
+The cost fields are estimates based on the hardcoded pricing in `main.go`.
 
 Open the debug tab directly:
 
@@ -143,8 +167,8 @@ http://<unraid-ip>:18188/dashboard#debug
 ```
 
 Debug endpoints compare the raw Hermes request with the normalized request sent
-to DeepSeek. They expose prefix hashes, system hash, tools hash, original tool
-order, normalized tool order, and truncated request previews.
+to the upstream model. They expose prefix hashes, system hash, tools hash,
+original tool order, normalized tool order, and truncated request previews.
 
 ## Cache Test
 
@@ -178,7 +202,9 @@ Done:
 
 - Go proxy for `/v1/chat/completions`.
 - `deepseek-v4-flash` and `deepseek-v4-pro` model whitelist.
+- `MiniMax-M3` upstream routing and metrics.
 - Proxy auth key and container-side DeepSeek key.
+- Container-side MiniMax key.
 - Buffered and streaming forwarding.
 - Usage capture for buffered and SSE responses.
 - `/metrics`, `/dashboard`, `/debug/requests`, `/debug/requests/<id>`.
@@ -186,7 +212,7 @@ Done:
 - Tool sorting by `function.name`.
 - Prefix hash and debug trace.
 - Trace and metrics persistence through JSONL.
-- Token savings visualization and CNY estimate.
+- Token savings visualization and per-currency cost estimate.
 - GHCR Docker publish workflow.
 - Unraid configuration reference.
 - Unit tests.
