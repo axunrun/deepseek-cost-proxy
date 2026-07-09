@@ -100,6 +100,10 @@ The proxy writes request metrics and debug traces to:
 /data/traces/requests.jsonl
 ```
 
+On Unraid, the `/data` path mapping is required. Without it, history is written
+inside the container filesystem and will be lost when the container is recreated
+or updated.
+
 ## Endpoints
 
 - `GET /v1`
