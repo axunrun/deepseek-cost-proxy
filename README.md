@@ -103,6 +103,8 @@ The proxy writes request metrics and debug traces to:
 On Unraid, the `/data` path mapping is required. Without it, history is written
 inside the container filesystem and will be lost when the container is recreated
 or updated.
+The container runs as root by default so it can write to Unraid bind-mounted
+appdata paths without extra permission setup.
 
 Check the active container storage path:
 
