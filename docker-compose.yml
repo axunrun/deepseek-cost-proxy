@@ -1,0 +1,16 @@
+services:
+  deepseek-cost-proxy:
+    image: ${IMAGE_NAME:-deepseek-cost-proxy:local}
+    build: .
+    container_name: deepseek-cost-proxy
+    ports:
+      - "18188:18188"
+    environment:
+      PROXY_ADDR: ":18188"
+      DEFAULT_MODEL: "deepseek-v4-flash"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY}"
+      PROXY_AUTH_KEY: "${PROXY_AUTH_KEY:-local-proxy-key}"
+      TRACE_DIR: "/data/traces"
+    volumes:
+      - /mnt/user/appdata/deepseek-cost-proxy:/data
+    restart: unless-stopped

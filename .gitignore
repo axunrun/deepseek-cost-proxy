@@ -1,0 +1,6 @@
+.env
+traces/
+tmp-traces/
+*.log
+*.exe
+deepseek-cost-proxy
