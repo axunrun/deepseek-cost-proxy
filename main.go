@@ -548,8 +548,8 @@ func applyUsage(metric *requestMetric, u usage) {
 	metric.PromptCacheHitTokens = u.PromptCacheHitTokens
 	metric.PromptCacheMissTokens = u.PromptCacheMissTokens
 	metric.HitRate = hitRate
-	metric.EstimatedCostCNY = estimateCostCNY(u)
-	metric.EstimatedSavedCNY = estimateSavedCNY(u)
+	metric.EstimatedCostCNY = estimateCostCNY(metric.Model, u)
+	metric.EstimatedSavedCNY = estimateSavedCNY(metric.Model, u)
 }
 
 type pricing struct {
@@ -558,26 +558,35 @@ type pricing struct {
 	Output   float64
 }
 
-func pricingForModel() pricing {
-	return pricing{
-		CacheHit: 0.02,
-		Input:    1,
-		Output:   2,
+func pricingForModel(model string) pricing {
+	switch model {
+	case "deepseek-v4-pro":
+		return pricing{
+			CacheHit: 0.025,
+			Input:    3,
+			Output:   6,
+		}
+	default:
+		return pricing{
+			CacheHit: 0.02,
+			Input:    1,
+			Output:   2,
+		}
 	}
 }
 
-func estimateCostCNY(u usage) float64 {
-	rate := pricingForModel()
+func estimateCostCNY(model string, u usage) float64 {
+	rate := pricingForModel(model)
 	return (float64(u.PromptCacheHitTokens)*rate.CacheHit +
 		float64(u.PromptCacheMissTokens)*rate.Input +
 		float64(u.CompletionTokens)*rate.Output) / 1_000_000
 }
 
-func estimateSavedCNY(u usage) float64 {
+func estimateSavedCNY(model string, u usage) float64 {
 	if u.PromptCacheHitTokens <= 0 {
 		return 0
 	}
-	rate := pricingForModel()
+	rate := pricingForModel(model)
 	return float64(u.PromptCacheHitTokens) * (rate.Input - rate.CacheHit) / 1_000_000
 }
 

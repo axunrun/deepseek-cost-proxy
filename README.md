@@ -27,6 +27,28 @@ Use `deepseek-v4-flash` as the low-cost default. Use `deepseek-v4-pro` by
 setting the request `model` to `deepseek-v4-pro`, or by creating a second Hermes
 model entry with the same `base_url` and `api_key`.
 
+Thinking mode is enabled by default in DeepSeek V4. To disable it, send:
+
+```json
+{"thinking":{"type":"disabled"}}
+```
+
+To keep thinking mode and control effort, send:
+
+```json
+{"thinking":{"type":"enabled"},"reasoning_effort":"high"}
+```
+
+`reasoning_effort` also accepts `max`. When thinking mode is used with tool
+calls, callers must preserve and send back `reasoning_content` in later turns.
+
+Hardcoded CNY pricing estimate per 1M tokens:
+
+| Model | Cache hit input | Cache miss input | Output |
+| --- | ---: | ---: | ---: |
+| `deepseek-v4-flash` | 0.02 | 1 | 2 |
+| `deepseek-v4-pro` | 0.025 | 3 | 6 |
+
 ## Docker / Unraid
 
 Local build:

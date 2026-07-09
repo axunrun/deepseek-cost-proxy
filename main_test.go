@@ -117,6 +117,28 @@ func TestCopyStreamAndCaptureUsage(t *testing.T) {
 	}
 }
 
+func TestApplyUsageUsesModelPricing(t *testing.T) {
+	u := usage{
+		PromptTokens:          2_000_000,
+		PromptCacheHitTokens:  1_000_000,
+		PromptCacheMissTokens: 1_000_000,
+		CompletionTokens:      1_000_000,
+		TotalTokens:           3_000_000,
+	}
+	flash := requestMetric{Model: "deepseek-v4-flash"}
+	pro := requestMetric{Model: "deepseek-v4-pro"}
+
+	applyUsage(&flash, u)
+	applyUsage(&pro, u)
+
+	if flash.EstimatedCostCNY != 3.02 || flash.EstimatedSavedCNY != 0.98 {
+		t.Fatalf("flash cost = %+v", flash)
+	}
+	if pro.EstimatedCostCNY != 9.025 || pro.EstimatedSavedCNY != 2.975 {
+		t.Fatalf("pro cost = %+v", pro)
+	}
+}
+
 func TestMetricsStorePersistsAndLoadsRequests(t *testing.T) {
 	dir := t.TempDir()
 	store := newMetricsStore(dir)
