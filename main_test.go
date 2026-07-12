@@ -193,6 +193,26 @@ func TestCopyStreamAndCaptureUsage(t *testing.T) {
 	}
 }
 
+type flushBuffer struct {
+	bytes.Buffer
+	count int
+}
+
+func (b *flushBuffer) Flush() {
+	b.count++
+}
+
+func TestCopyStreamAndCaptureUsageFlushes(t *testing.T) {
+	var out flushBuffer
+	_, err := copyStreamAndCaptureUsage(&out, strings.NewReader("data: [DONE]\n"), "MiniMax-M3", 200)
+	if err != nil {
+		t.Fatalf("copyStreamAndCaptureUsage: %v", err)
+	}
+	if out.count == 0 {
+		t.Fatal("expected stream flush")
+	}
+}
+
 func TestApplyUsageUsesModelPricing(t *testing.T) {
 	u := usage{
 		PromptTokens:          2_000_000,

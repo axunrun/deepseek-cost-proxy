@@ -336,9 +336,10 @@ func handleChatCompletions(cfg config, metrics *metricsStore, w http.ResponseWri
 	defer resp.Body.Close()
 
 	copyHeaders(w.Header(), resp.Header)
-	w.WriteHeader(resp.StatusCode)
-
 	if isStreamResponse(resp.Header) {
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(resp.StatusCode)
 		metric, err := copyStreamAndCaptureUsage(w, resp.Body, normalized.model, resp.StatusCode)
 		attachTrace(&metric, normalized.trace)
 		if err != nil {
@@ -348,6 +349,7 @@ func handleChatCompletions(cfg config, metrics *metricsStore, w http.ResponseWri
 		logUsage(metric)
 		return
 	}
+	w.WriteHeader(resp.StatusCode)
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -595,10 +597,14 @@ func copyStreamAndCaptureUsage(dst io.Writer, src io.Reader, model string, statu
 	}
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	flusher, _ := dst.(http.Flusher)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if _, err := fmt.Fprintln(dst, line); err != nil {
 			return metric, err
+		}
+		if flusher != nil {
+			flusher.Flush()
 		}
 		if strings.HasPrefix(line, "data:") {
 			updateMetricFromSSEData(&metric, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
