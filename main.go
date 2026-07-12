@@ -178,12 +178,25 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.addr,
-		Handler:           mux,
+		Handler:           withCORS(mux),
 		ReadHeaderTimeout: 15 * time.Second,
 	}
 
 	log.Printf("deepseek-cost-proxy listening on %s", cfg.addr)
 	log.Fatal(server.ListenAndServe())
+}
+
+func withCORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func loadConfig() (config, error) {

@@ -108,6 +108,25 @@ func TestHandleModelsIncludesConfiguredMiniMax(t *testing.T) {
 	}
 }
 
+func TestWithCORSHandlesPreflight(t *testing.T) {
+	handler := withCORS(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodOptions, "/v1/models", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" ||
+		rec.Header().Get("Access-Control-Allow-Methods") != "GET, POST, OPTIONS" ||
+		rec.Header().Get("Access-Control-Allow-Headers") != "Authorization, Content-Type" {
+		t.Fatalf("headers = %+v", rec.Header())
+	}
+}
+
 func TestNormalizeRequestSortsToolsAndRecordsDebugTrace(t *testing.T) {
 	body := []byte(`{
 		"model":"deepseek-v4-flash",
