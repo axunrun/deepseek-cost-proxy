@@ -213,6 +213,17 @@ func TestCopyStreamAndCaptureUsageFlushes(t *testing.T) {
 	}
 }
 
+func TestCopyStreamAndCaptureUsageAddsDone(t *testing.T) {
+	var out bytes.Buffer
+	_, err := copyStreamAndCaptureUsage(&out, strings.NewReader("data: {}\n\n"), "MiniMax-M3", 200)
+	if err != nil {
+		t.Fatalf("copyStreamAndCaptureUsage: %v", err)
+	}
+	if strings.Count(out.String(), "data: [DONE]") != 1 {
+		t.Fatalf("stream = %q", out.String())
+	}
+}
+
 func TestApplyUsageUsesModelPricing(t *testing.T) {
 	u := usage{
 		PromptTokens:          2_000_000,

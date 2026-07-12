@@ -598,6 +598,7 @@ func copyStreamAndCaptureUsage(dst io.Writer, src io.Reader, model string, statu
 	scanner := bufio.NewScanner(src)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	flusher, _ := dst.(http.Flusher)
+	sawDone := false
 	for scanner.Scan() {
 		line := scanner.Text()
 		if _, err := fmt.Fprintln(dst, line); err != nil {
@@ -607,10 +608,28 @@ func copyStreamAndCaptureUsage(dst io.Writer, src io.Reader, model string, statu
 			flusher.Flush()
 		}
 		if strings.HasPrefix(line, "data:") {
-			updateMetricFromSSEData(&metric, strings.TrimSpace(strings.TrimPrefix(line, "data:")))
+			data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if data == "[DONE]" {
+				sawDone = true
+			}
+			updateMetricFromSSEData(&metric, data)
 		}
 	}
-	return metric, scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return metric, err
+	}
+	if !sawDone {
+		if _, err := fmt.Fprintln(dst, "data: [DONE]"); err != nil {
+			return metric, err
+		}
+		if _, err := fmt.Fprintln(dst); err != nil {
+			return metric, err
+		}
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+	return metric, nil
 }
 
 func updateMetricFromSSEData(metric *requestMetric, data string) {
